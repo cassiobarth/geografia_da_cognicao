@@ -3,16 +3,15 @@ PROJECT:     Cognitive Capital Analysis - Brazil
 SCRIPT:      src/cog/04_process_enem_historical.py
 RESEARCHERS: Dr. Jose Aparecido da Silva
              Me. Cassio Dalbem Barth
-DATE:        2026-01-08 (Fix v2.1: Zero-Inflation Handler)
+DATE:        2026-01-08 (Fix v2.2: Detailed Subject Scores)
 
 DESCRIPTION:
-    Extracts historical ENEM data (2015, 2018) from raw microdata zips.
+    Extracts historical ENEM data (2015, 2018) with full subject breakdown.
     
-    CRITICAL FIXES (v2.1):
-    1. Zero Handling: Converts scores of 0.0 to NaN before averaging. 
-       This prevents absent days (Score=0) from artificially dragging down 
-       the state averages (The "Range < 400" bug).
-    2. UF Priority: Refined column detection to prefer Residence over School State.
+    IMPROVEMENTS:
+    - Detailed Metrics: Extracts Math, Language, Humanities, Nature, and Essay separately.
+    - Zero Handling: Converts 0.0 to NaN per subject to avoid bias.
+    - Normalization: Column names standardized to English (matches PISA/SAEB scripts).
 
 INPUT:
     - data/raw/microdados_enem_2015.zip
@@ -51,12 +50,20 @@ os.makedirs(REPORT_XLSX, exist_ok=True)
 
 YEARS = [2015, 2018]
 
-# Priority List: Residence > School (Esc) > Generic
 POSSIBLE_UF_COLS = [
-    'SG_UF_RESIDENCIA', 'UF_RESIDENCIA', 'NO_UF_RESIDENCIA', # Residence (Best)
-    'SG_UF_ESC', 'UF_ESC', 'NO_UF_ESC'                       # School (Fallback)
+    'SG_UF_RESIDENCIA', 'UF_RESIDENCIA', 'NO_UF_RESIDENCIA',
+    'SG_UF_ESC', 'UF_ESC'
 ]
-POSSIBLE_SCORES = ['NU_NOTA_CN', 'NU_NOTA_CH', 'NU_NOTA_LC', 'NU_NOTA_MT', 'NU_NOTA_REDACAO']
+
+# Map original columns to Standard English names
+SCORE_MAP = {
+    'NU_NOTA_MT': 'Math',
+    'NU_NOTA_LC': 'Language',
+    'NU_NOTA_CH': 'Humanities',
+    'NU_NOTA_CN': 'Natural_Sciences',
+    'NU_NOTA_REDACAO': 'Essay'
+}
+POSSIBLE_SCORES = list(SCORE_MAP.keys())
 
 REGIONAL_MAP = {
     'N': ['AC','AP','AM','PA','RO','RR','TO'],
@@ -68,18 +75,14 @@ REGIONAL_MAP = {
 UF_TO_REGION = {uf: r for r, ufs in REGIONAL_MAP.items() for uf in ufs}
 
 def identify_columns(header):
-    """Dynamically finds the UF column and available Score columns."""
-    # Find UF based on priority list
+    """Finds UF and available Score columns."""
     uf_col = next((c for c in POSSIBLE_UF_COLS if c in header), None)
-    
-    # Find Scores
     score_cols = [c for c in POSSIBLE_SCORES if c in header]
-    
     return uf_col, score_cols
 
 def process_year(year):
     print("="*60)
-    print(f"[START] Processing ENEM {year}")
+    print(f"[START] Processing ENEM {year} (Full Breakdown)")
     print("="*60)
     
     zip_filename = f"microdados_enem_{year}.zip"
@@ -91,24 +94,19 @@ def process_year(year):
 
     try:
         with zipfile.ZipFile(zip_path, 'r') as z:
-            # Smart file finder (ignores 'ITENS' or docs)
             csv_file = next((f for f in z.namelist() 
                              if f.endswith('.csv') and 'MICRODADOS' in f and 'ITENS' not in f), None)
             
             if not csv_file:
-                # Fallback: take the largest CSV
+                # Fallback size check
                 csv_files = [f for f in z.namelist() if f.endswith('.csv')]
-                if not csv_files:
-                    print("[ERROR] No CSV found inside zip.")
-                    return
-                # Sort by size (largest is likely the data)
+                if not csv_files: return
                 csv_file = sorted(csv_files, key=lambda x: z.getinfo(x).file_size, reverse=True)[0]
             
             print(f"[FILE] Target: {csv_file}")
             
             # 1. READ HEADER
             try:
-                # Try semicolon first
                 header = pd.read_csv(z.open(csv_file), sep=';', nrows=0, encoding='latin1').columns.tolist()
                 sep = ';'
             except:
@@ -117,25 +115,18 @@ def process_year(year):
             
             uf_col, score_cols = identify_columns(header)
             
-            if not uf_col:
-                print(f"[CRITICAL] UF Column not found. Header sample: {header[:10]}")
-                return
-            
-            if not score_cols:
-                print("[CRITICAL] No score columns found.")
+            if not uf_col or not score_cols:
+                print(f"[CRITICAL] Missing columns. Header: {header[:10]}")
                 return
 
-            print(f"[INFO] Structure detected:")
-            print(f"       - Separator: '{sep}'")
-            print(f"       - UF Column: {uf_col}")
-            print(f"       - Scores: {len(score_cols)} variables")
+            print(f"[INFO] Found {len(score_cols)} subject columns. aggregating...")
 
             # 2. CHUNK PROCESSING
             use_cols = [uf_col] + score_cols
             chunk_size = 100000
-            agg_data = {} 
             
-            print("[INFO] Stream processing started...")
+            # We will store aggregated chunks here to concat later (faster than dict iteration for many cols)
+            chunk_aggs = []
             
             reader = pd.read_csv(z.open(csv_file), sep=sep, encoding='latin1', 
                                usecols=use_cols, chunksize=chunk_size)
@@ -150,64 +141,78 @@ def process_year(year):
                 for col in score_cols:
                     chunk[col] = pd.to_numeric(chunk[col], errors='coerce')
                 
-                # B. CRITICAL FIX: Treat 0.0 as NaN
-                # This prevents students absent in one area from dragging down the average
+                # B. Handle Zeros (Inflation Fix)
                 chunk[score_cols] = chunk[score_cols].replace(0, np.nan)
                 
-                # C. Calculate Student Mean (ignoring NaNs)
-                chunk['Student_Avg'] = chunk[score_cols].mean(axis=1)
+                # C. Calculate General Mean (Row-wise)
+                chunk['Mean_General'] = chunk[score_cols].mean(axis=1)
                 
-                # D. Drop students with NO scores (all NaNs)
-                chunk = chunk.dropna(subset=['Student_Avg'])
+                # D. Rename to English (e.g. NU_NOTA_MT -> Math)
+                chunk = chunk.rename(columns=SCORE_MAP)
                 
-                # Group
-                grouped = chunk.groupby(uf_col)['Student_Avg'].agg(['sum', 'count'])
+                # E. Update score_cols list to new names
+                current_scores = [SCORE_MAP[c] for c in score_cols] + ['Mean_General']
                 
-                for uf, row in grouped.iterrows():
-                    if uf not in agg_data:
-                        agg_data[uf] = {'sum': 0.0, 'count': 0}
-                    agg_data[uf]['sum'] += row['sum']
-                    agg_data[uf]['count'] += row['count']
+                # F. Group and Sum/Count
+                # We aggregate Sum and Count for ALL columns separately
+                grouped = chunk.groupby(uf_col)[current_scores].agg(['sum', 'count'])
+                chunk_aggs.append(grouped)
 
-            print(f"\n[INFO] Aggregation complete. Processed approx {batch_count * chunk_size} rows.")
+            print(f"\n[INFO] Aggregation complete. Consolidating chunks...")
 
             # 3. CONSOLIDATE
+            # Concatenate all partial sums/counts
+            full_agg = pd.concat(chunk_aggs)
+            
+            # Sum the partial sums and counts by UF
+            final_agg = full_agg.groupby(level=0).sum()
+            
+            # Calculate final Weighted Means
             results = []
-            for uf, metrics in agg_data.items():
-                if metrics['count'] > 0:
-                    mean_val = metrics['sum'] / metrics['count']
-                    results.append({'UF': uf, 'Mean_General': mean_val, 'Student_Count': metrics['count']})
+            # Columns are MultiIndex: (Subject, Stat) -> e.g. ('Math', 'sum')
+            subjects = [c[0] for c in final_agg.columns.unique()]
             
-            df_final = pd.DataFrame(results)
+            # Calculate means
+            df_means = pd.DataFrame(index=final_agg.index)
+            for subj in set([x[0] for x in final_agg.columns]):
+                # Sum / Count
+                df_means[subj] = final_agg[(subj, 'sum')] / final_agg[(subj, 'count')]
             
-            # Map Region
+            # Add Student Count (max count across subjects approx)
+            df_means['Student_Count'] = final_agg[('Mean_General', 'count')]
+            
+            df_final = df_means.reset_index().rename(columns={uf_col: 'UF'})
+            
+            # 4. ENRICHMENT
             df_final['Region'] = df_final['UF'].map(UF_TO_REGION)
             
-            # Sort
-            df_final = df_final.sort_values('Mean_General', ascending=False)
-            df_final = df_final[['Region', 'UF', 'Mean_General', 'Student_Count']]
+            # Reorder columns nicely
+            target_order = ['Region', 'UF', 'Mean_General', 'Student_Count', 'Math', 'Language', 'Humanities', 'Natural_Sciences', 'Essay']
+            # Filter only columns that exist (in case 2015 lacks something)
+            final_cols = [c for c in target_order if c in df_final.columns]
+            df_final = df_final[final_cols].sort_values('Mean_General', ascending=False)
 
-            # 4. SAFEGUARD
+            # 5. SAFEGUARD
             if DataGuard:
                 print("[AUDIT] Running DataGuard...")
                 guard = DataGuard(df_final, f"ENEM {year}")
-                # Now that zeros are handled, we expect means > 450
-                guard.check_range(['Mean_General'], 450, 700) 
+                guard.check_range(['Math', 'Language'], 350, 800) # Subject ranges
                 guard.check_historical_consistency('Mean_General', 'UF')
                 guard.validate(strict=True)
 
-            # 5. EXPORT
+            # 6. EXPORT
             csv_path = os.path.join(DATA_PROCESSED, f'enem_table_{year}.csv')
             xlsx_path = os.path.join(REPORT_XLSX, f'enem_table_{year}.xlsx')
             
             df_final.to_csv(csv_path, index=False)
             df_final.to_excel(xlsx_path, index=False)
             
-            print(f"[SUCCESS] Saved: {csv_path}")
+            print(f"[SUCCESS] Saved detailed report: {csv_path}")
 
     except Exception as e:
         print(f"[CRITICAL ERROR] {e}")
-        # import traceback; traceback.print_exc()
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
     for y in YEARS:

@@ -1,135 +1,163 @@
 """
 PROJECT:     Cognitive Capital Analysis - Brazil
 SCRIPT:      src/cog/01_process_saeb_2023.py
-RESEARCHERS: Dr. José Aparecido da Silva
-             Me. Cássio Dalbem Barth
-DATE:        2026-01-08 (Updated)
+RESEARCHERS: Dr. Jose Aparecido da Silva
+             Me. Cassio Dalbem Barth
+DATE:        2026-01-08 (Standardized v2.0)
 
-DESCRIPTION: 
-    Extracts SAEB 2023 data (School Level).
-    - Maps IBGE codes to States (UF) and Macro-Regions.
-    - Calculates Mean Scores (Math + Portuguese) for High School (EM).
-    - EXPORTS TO ENGINEERING: data/processed/saeb_2023_states.csv
-    - EXPORTS TO ANALYTICS:   reports/varcog/csv/ & xlsx/
+DESCRIPTION:
+    Extracts SAEB 2023 data (High School Level).
+    
+    CONSISTENCY UPDATES:
+    - Column Names: Renamed to English (Math_Mean, Language_Mean) to match historical files.
+    - Filename: Output standardized to 'saeb_table_2023.csv'.
+    - Security: Integrated DataGuard for integrity checking.
+
+INPUT:
+    - data/raw/microdados_saeb_2023.zip
+
+OUTPUT:
+    - data/processed/saeb_table_2023.csv
+    - reports/varcog/xlsx/saeb_table_2023.xlsx
 """
+
 import pandas as pd
 import numpy as np
 import os
+import sys
 import zipfile
 import matplotlib.pyplot as plt
 import seaborn as sns
-from pathlib import Path
 
-# --- 1. CONFIGURATION ---
-SEED = 42
-np.random.seed(SEED)
+# --- 1. SAFEGUARD IMPORT PROTOCOL ---
+script_dir = os.path.dirname(os.path.abspath(__file__))
+lib_path = os.path.join(script_dir, 'lib')
+if lib_path not in sys.path: sys.path.append(lib_path)
 
-# --- PATH CONFIGURATION ---
-CURRENT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = CURRENT_DIR.parent.parent
+try:
+    from safeguard import DataGuard
+except ImportError:
+    DataGuard = None
 
-# Input
-ZIP_PATH = PROJECT_ROOT / 'data' / 'raw' / 'microdados_saeb_2023.zip'
+# --- 2. CONFIGURATION ---
+BASE_PATH = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+DATA_RAW = os.path.join(BASE_PATH, 'data', 'raw')
+DATA_PROCESSED = os.path.join(BASE_PATH, 'data', 'processed')
+REPORT_XLSX = os.path.join(BASE_PATH, 'reports', 'varcog', 'xlsx')
+REPORT_IMG = os.path.join(BASE_PATH, 'reports', 'varcog', 'graficos')
 
-# 1. Engineering Outputs (CSV for modeling)
-PROC_DIR = PROJECT_ROOT / 'data' / 'processed'
-PATH_PROC_CSV = PROC_DIR / 'saeb_2023_states.csv'
+os.makedirs(DATA_PROCESSED, exist_ok=True)
+os.makedirs(REPORT_XLSX, exist_ok=True)
+os.makedirs(REPORT_IMG, exist_ok=True)
 
-# 2. Reporting Outputs (XLSX and graphs for analytics)
-REPORT_XLSX_DIR = PROJECT_ROOT / 'reports' / 'varcog'/ 'xlsx'
-PATH_XLSX = REPORT_XLSX_DIR / 'saeb_2023_states.xlsx'
-
-REPORT_IMG_DIR = PROJECT_ROOT / 'reports' / 'graficos'
-PATH_IMG = REPORT_IMG_DIR / 'ranking_saeb_2023.png'
-
-# --- MAPPINGS ---
-IBGE_CODE_MAP = {
-    11: 'RO', 12: 'AC', 13: 'AM', 14: 'RR', 15: 'PA', 16: 'AP', 17: 'TO',
-    21: 'MA', 22: 'PI', 23: 'CE', 24: 'RN', 25: 'PB', 26: 'PE', 27: 'AL', 28: 'SE', 29: 'BA',
-    31: 'MG', 32: 'ES', 33: 'RJ', 35: 'SP',
-    41: 'PR', 42: 'SC', 43: 'RS',
-    50: 'MS', 51: 'MT', 52: 'GO', 53: 'DF'
+# MAPPINGS
+IBGE_TO_SIGLA = {
+    11:'RO', 12:'AC', 13:'AM', 14:'RR', 15:'PA', 16:'AP', 17:'TO',
+    21:'MA', 22:'PI', 23:'CE', 24:'RN', 25:'PB', 26:'PE', 27:'AL', 28:'SE', 29:'BA',
+    31:'MG', 32:'ES', 33:'RJ', 35:'SP',
+    41:'PR', 42:'SC', 43:'RS',
+    50:'MS', 51:'MT', 52:'GO', 53:'DF'
 }
 
-UF_REGION_MAP = {
-    'RO': 'North', 'AC': 'North', 'AM': 'North', 'RR': 'North', 'PA': 'North', 'AP': 'North', 'TO': 'North',
-    'MA': 'Northeast', 'PI': 'Northeast', 'CE': 'Northeast', 'RN': 'Northeast', 'PB': 'Northeast', 
-    'PE': 'Northeast', 'AL': 'Northeast', 'SE': 'Northeast', 'BA': 'Northeast',
-    'MG': 'Southeast', 'ES': 'Southeast', 'RJ': 'Southeast', 'SP': 'Southeast',
-    'PR': 'South', 'SC': 'South', 'RS': 'South',
-    'MS': 'Center-West', 'MT': 'Center-West', 'GO': 'Center-West', 'DF': 'Center-West'
+REGIONAL_MAP = {
+    'N': ['RO','AC','AM','RR','PA','AP','TO'],
+    'NE': ['MA','PI','CE','RN','PB','PE','AL','SE','BA'],
+    'SE': ['MG','ES','RJ','SP'],
+    'S': ['PR','SC','RS'],
+    'CO': ['MS','MT','GO','DF']
 }
+UF_TO_REGION = {uf: r for r, ufs in REGIONAL_MAP.items() for uf in ufs}
 
-def setup_directories():
-    # Cria todas as pastas necessárias antes de começar
-    for p in [PROC_DIR, REPORT_XLSX_DIR, REPORT_IMG_DIR]:
-        p.mkdir(parents=True, exist_ok=True)
+def load_and_process():
+    print("="*60)
+    print("[START] SAEB 2023 Processing")
+    print("="*60)
 
-def load_data():
-    print(f"[INFO] Reading ZIP: {ZIP_PATH.name}")
+    zip_file = os.path.join(DATA_RAW, 'microdados_saeb_2023.zip')
+    
+    if not os.path.exists(zip_file):
+        print(f"[ERROR] File not found: {zip_file}")
+        return
+
     try:
-        with zipfile.ZipFile(ZIP_PATH) as z:
-            target = next(f for f in z.namelist() if 'TS_ESCOLA.csv' in f)
-            print(f"       - Found target: {target}")
-            cols = ['ID_UF', 'MEDIA_EM_LP', 'MEDIA_EM_MT']
+        with zipfile.ZipFile(zip_file) as z:
+            # Find TS_ESCOLA
+            target = next((f for f in z.namelist() if 'TS_ESCOLA' in f and f.endswith('.csv')), None)
+            
+            if not target:
+                print("[ERROR] TS_ESCOLA not found inside zip.")
+                return
+
+            print(f"[FILE] Extracting: {target}")
+            
+            # SAEB 2023 usually strictly uses ';'
+            # We specifically want High School (EM) scores
+            cols_map = {
+                'ID_UF': 'UF_ID',
+                'MEDIA_EM_LP': 'Language_Mean',
+                'MEDIA_EM_MT': 'Math_Mean'
+            }
+            
             with z.open(target) as f:
-                return pd.read_csv(f, sep=';', usecols=cols, encoding='latin1')
+                df = pd.read_csv(f, sep=';', usecols=cols_map.keys(), encoding='latin1')
+            
+            # Rename to Standard English
+            df = df.rename(columns=cols_map)
+            
+            # Clean Numeric
+            for col in ['Language_Mean', 'Math_Mean']:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+            
+            df = df.dropna(subset=['Language_Mean', 'Math_Mean'])
+            
+            # Map Geography
+            df['UF'] = df['UF_ID'].map(IBGE_TO_SIGLA)
+            df['Region'] = df['UF'].map(UF_TO_REGION)
+            
+            # Aggregation (State Level)
+            grouped = df.groupby(['Region', 'UF'])[['Math_Mean', 'Language_Mean']].mean().reset_index()
+            
+            # Global Score Calculation
+            grouped['SAEB_General'] = (grouped['Math_Mean'] + grouped['Language_Mean']) / 2
+            
+            # Sort
+            grouped = grouped.sort_values('SAEB_General', ascending=False)
+            
+            # Reorder columns
+            grouped = grouped[['Region', 'UF', 'SAEB_General', 'Math_Mean', 'Language_Mean']]
+
+            # --- SAFEGUARD ---
+            if DataGuard:
+                print("[AUDIT] Running DataGuard...")
+                guard = DataGuard(grouped, "SAEB 2023")
+                # SAEB High School averages usually between 220 and 320
+                guard.check_range(['Math_Mean', 'Language_Mean'], 200, 400)
+                guard.check_historical_consistency('SAEB_General', 'UF')
+                guard.validate(strict=True)
+
+            # SAVE
+            csv_path = os.path.join(DATA_PROCESSED, 'saeb_table_2023.csv')
+            xlsx_path = os.path.join(REPORT_XLSX, 'saeb_table_2023.xlsx')
+            img_path = os.path.join(REPORT_IMG, 'ranking_saeb_2023.png')
+
+            grouped.to_csv(csv_path, index=False)
+            grouped.to_excel(xlsx_path, index=False)
+            
+            print(f"[SUCCESS] Data saved:")
+            print(f"          CSV:  {csv_path}")
+            print(f"          XLSX: {xlsx_path}")
+
+            # Generate Graph (Optional visual check)
+            plt.figure(figsize=(10, 6))
+            sns.barplot(data=grouped, x='SAEB_General', y='UF', hue='Region', dodge=False)
+            plt.title('SAEB 2023 Ranking (Standardized)')
+            plt.tight_layout()
+            plt.savefig(img_path)
+            print(f"          IMG:  {img_path}")
+
     except Exception as e:
-        print(f"[ERROR] Failed to load data: {e}")
-        return None
-
-def process_data(df):
-    print("[INFO] Processing data...")
-    for col in ['MEDIA_EM_LP', 'MEDIA_EM_MT']:
-        df[col] = pd.to_numeric(df[col], errors='coerce')
-    df = df.dropna(subset=['MEDIA_EM_LP', 'MEDIA_EM_MT']).copy()
-
-    df['ID_UF'] = pd.to_numeric(df['ID_UF'], errors='coerce').fillna(0).astype(int)
-    df['UF'] = df['ID_UF'].map(IBGE_CODE_MAP)
-    df['Region'] = df['UF'].map(UF_REGION_MAP)
-
-    if df['Region'].isna().any():
-        print(f"[WARNING] Rows unmapped to Region.")
-
-    res = df.groupby(['Region', 'UF'], as_index=False)[['MEDIA_EM_MT', 'MEDIA_EM_LP']].mean()
-    res['SAEB_General'] = (res['MEDIA_EM_MT'] + res['MEDIA_EM_LP']) / 2
-    
-    return res.round(2).sort_values('SAEB_General', ascending=False)[['Region', 'UF', 'MEDIA_EM_MT', 'MEDIA_EM_LP', 'SAEB_General']]
-
-def generate_chart(df):
-    print("[INFO] Generating Chart...")
-    plt.figure(figsize=(12, 8))
-    sns.set_theme(style="whitegrid")
-    
-    sns.barplot(
-        x='SAEB_General', y='UF', data=df, 
-        palette='viridis', hue='Region', dodge=False
-    )
-    
-    plt.title('SAEB 2023 Ranking - High School', fontsize=14)
-    plt.xlabel('Mean Score')
-    plt.tight_layout()
-    plt.savefig(PATH_IMG, dpi=300)
-    plt.close()
-    print(f"       - Image saved: {PATH_IMG}")
+        print(f"[CRITICAL ERROR] {e}")
+        # import traceback; traceback.print_exc()
 
 if __name__ == "__main__":
-    setup_directories()
-    
-    if ZIP_PATH.exists():
-        df_raw = load_data()
-        
-        if df_raw is not None:
-            df_final = process_data(df_raw)
-            
-            # 1. Save to ENGINEERING (Processed - CSV)
-            df_final.to_csv(PATH_PROC_CSV, index=False)
-            print(f"[ENGINEERING] CSV Saved: {PATH_PROC_CSV}")
-            
-            # 2. Save to ANALYTICS (Report - XLSX)
-            df_final.to_excel(PATH_XLSX, index=False)
-            print(f"[ANALYTICS] Excel Saved: {PATH_XLSX}")
-            
-            generate_chart(df_final)
-    else:
-        print(f"[ERROR] File not found: {ZIP_PATH}")
+    load_and_process()
