@@ -10,3 +10,21 @@
 2026-01-10 12:15:48,907 | Grade 5EF mapped: MEDIA_5EF_LP, MEDIA_5EF_MT
 2026-01-10 12:15:48,907 | Grade 9EF mapped: MEDIA_9EF_LP, MEDIA_9EF_MT
 2026-01-10 12:15:48,911 | Critical: Usecols do not match columns, columns expected but not found: ['ID_DEPENDENCIA_ADM']
+2026-01-10 14:07:27,732 | START: Year 2015 | Filter ALL | File microdados_saeb_2015.zip
+2026-01-10 14:07:27,812 | Grade 5EF mapped: MEDIA_5EF_LP, MEDIA_5EF_MT
+2026-01-10 14:07:27,812 | Grade 9EF mapped: MEDIA_9EF_LP, MEDIA_9EF_MT
+2026-01-10 14:07:28,826 | Success. Saved saeb_unified_2015_all
+INFO:root:   Mapped 5EF: MEDIA_5EF_LP, MEDIA_5EF_MT
+INFO:root:   Mapped 9EF: MEDIA_9EF_LP, MEDIA_9EF_MT
+INFO:root:   Mapped 5EF: MEDIA_5EF_LP, MEDIA_5EF_MT
+INFO:root:   Mapped 9EF: MEDIA_9EF_LP, MEDIA_9EF_MT
+INFO:root:   Mapped 5EF: MEDIA_5EF_LP, MEDIA_5EF_MT
+INFO:root:   Mapped 9EF: MEDIA_9EF_LP, MEDIA_9EF_MT
+INFO:root:   Mapped 5EF: MEDIA_5EF_LP, MEDIA_5EF_MT
+INFO:root:   Mapped 9EF: MEDIA_9EF_LP, MEDIA_9EF_MT
+INFO:root:   Mapped 5EF: MEDIA_5EF_LP, MEDIA_5EF_MT
+INFO:root:   Mapped 9EF: MEDIA_9EF_LP, MEDIA_9EF_MT
+INFO:root:   Mapped 5EF: MEDIA_5EF_LP, MEDIA_5EF_MT
+INFO:root:   Mapped 9EF: MEDIA_9EF_LP, MEDIA_9EF_MT
+INFO:root:   Mapped 5EF: MEDIA_5EF_LP, MEDIA_5EF_MT
+INFO:root:   Mapped 9EF: MEDIA_9EF_LP, MEDIA_9EF_MT
