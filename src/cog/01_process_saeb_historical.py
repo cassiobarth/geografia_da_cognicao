@@ -2,12 +2,13 @@
 PROJECT:     Cognitive Capital Analysis - Brazil
 SCRIPT:      src/cog/saeb_unified_pipeline.py
 ROLE:        Senior Data Science Advisor
-DATE:        2026-01-10 (v13.0 - Hybrid Network Logic)
+DATE:        2026-01-10 (v14.0 - Direct Extraction)
 
 DESCRIPTION:
-    Unified pipeline to process SAEB Microdata.
-    - FIX: Recognizes 'IN_PUBLICA' (2015/2017) and 'ID_DEPENDENCIA_ADM' (2019+).
-    - LOGIC: Auto-detects if column is already binary (0/1) or categorical (1-4).
+    Unified pipeline to extract SAEB School Averages.
+    - Uses PRE-CALCULATED averages from INEP (MEDIA_* columns).
+    - No re-calculation of student scores.
+    - Robust detection of 'Public/Private' indicators for all years.
 """
 
 import pandas as pd
@@ -125,20 +126,19 @@ class SaebPipeline:
                         f.seek(0)
                         header = pd.read_csv(f, sep=sep, encoding='latin1', nrows=0).columns.tolist()
 
-                    # 1. Identify Network Column (ADDED IN_PUBLICA)
+                    # 1. Identify Network Column (Maximized candidates)
                     network_candidates = [
-                        'IN_PUBLICA',          # Used in 2015/2017
-                        'ID_DEPENDENCIA_ADM',  # Used in 2019+
+                        'IN_PUBLICA',          # 2015/2017
+                        'ID_DEPENDENCIA_ADM',  # Standard
+                        'ID_DEPENDENCIA',      # Variation
                         'TP_DEPENDENCIA', 
                         'TP_DEPENDENCIA_ADM', 
                         'ID_REDE'
                     ]
                     col_adm = self.find_col_flexible(header, network_candidates, substring_fallback='DEPENDENCIA')
                     
-                    if col_adm:
-                        print(f"   [CHECK] Network Column Found: '{col_adm}'")
-                    else:
-                        print(f"   [CRITICAL] Network Column NOT Found. Headers: {header[:5]}...")
+                    if not col_adm:
+                        print(f"   [CRITICAL] Network Column NOT Found. Public_Share will be empty.")
 
                     col_uf = self.find_col_flexible(header, ['ID_UF', 'CO_UF', 'UF', 'SG_UF'])
 
@@ -166,20 +166,17 @@ class SaebPipeline:
                     f.seek(0)
                     df = pd.read_csv(f, sep=sep, encoding='latin1', usecols=final_use_cols)
 
-            # --- HYBRID PUBLIC SHARE CALCULATION ---
+            # --- PREPARE INDICATORS (DIRECT MAPPING) ---
             if col_adm and col_adm in df.columns:
                 # Force numeric conversion
                 df['TEMP_ADM'] = pd.to_numeric(df[col_adm], errors='coerce')
                 
-                # CASE A: 'IN_PUBLICA' is usually 0 or 1 already.
+                # Check column type by name to decide logic
                 if 'IN_PUBLICA' in col_adm.upper():
-                    # Just ensure it's mapped 1=Public, 0=Private
-                    # Sometimes IN_PUBLICA is boolean, sometimes 0/1. 
+                    # Usually 0/1 or True/False
                     df['Is_Public'] = df['TEMP_ADM'].apply(lambda x: 1 if x == 1 else 0)
-                
-                # CASE B: 'DEPENDENCIA' usually is 1,2,3,4
                 else:
-                    # 1,2,3 = Public | 4 = Private
+                    # Usually 1,2,3 (Public), 4 (Private)
                     def map_dependency(val):
                         if val in [1, 2, 3]: return 1
                         if val == 4: return 0
@@ -201,18 +198,19 @@ class SaebPipeline:
                 else: df['UF'] = df[col_uf]
             else: df['UF'] = 'BR'
 
-            # --- PROCESS SPLIT FILES ---
+            # --- EXTRACT AND SAVE ---
             for item in grades_to_process:
                 c_lp, c_mt = item['lp'], item['mt']
                 grade_label = item['grade']
                 
+                # Ensure numeric scores
                 for c in [c_lp, c_mt]:
                     df[c] = pd.to_numeric(df[c].astype(str).str.replace(',', '.', regex=False), errors='coerce')
 
                 sub = df.dropna(subset=[c_lp, c_mt]).copy()
                 if sub.empty: continue
 
-                # Aggregate
+                # AGGREGATE: Just averaging the existing school averages
                 grouped = sub.groupby('UF')[[c_lp, c_mt, 'Is_Public']].mean().reset_index()
                 
                 grouped.columns = ['UF', 'Language_Mean', 'Math_Mean', 'Public_Share']
@@ -230,7 +228,7 @@ class SaebPipeline:
                 save_path = os.path.join(REPORT_XLSX, f"{fname}.xlsx")
                 final_grade_df.to_excel(save_path, index=False)
                 
-                print(f"   -> Saved: {fname}.xlsx (Records: {len(final_grade_df)})")
+                print(f"   -> Saved: {fname}.xlsx (Escolas: {len(sub)})")
             
         except Exception as e:
             print(f"[ERROR] {e}")
@@ -240,7 +238,7 @@ class SaebPipeline:
 
 def main():
     os.system('cls' if os.name == 'nt' else 'clear')
-    print("=== SAEB PIPELINE V13.0 (HYBRID LOGIC) ===")
+    print("=== SAEB DATA EXTRACTOR v14.0 ===")
 
     # 1. Years
     raw = input_timeout(">> Anos (ex: 2019, 2023)", timeout=5, default="2015, 2017, 2023")
@@ -273,7 +271,7 @@ def main():
         if final_path:
             SaebPipeline(y, final_path, selected_filter).process()
 
-    print("\n[DONE] Processamento concluído.")
+    print("\n[DONE] Extração concluída.")
 
 if __name__ == "__main__":
     main()
