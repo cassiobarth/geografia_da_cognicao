@@ -143,7 +143,9 @@ def generate_plots(df, W):
     
     parallel_coordinates(plot_df[['Rank_PISA', 'Rank_SAEB', 'Rank_ENEM', 'Performance']], 
                          'Performance', color=custom_colors, alpha=0.7, linewidth=2.5)
-    
+    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', title="Grupos de Performance")
+    for i, row in plot_df.iterrows():
+        plt.text(2.02, row['Rank_ENEM'], f"  {row['UF']}", fontsize=9, va='center', fontweight='bold')
     plt.gca().invert_yaxis()
     plt.title(f'Consistência Hierárquica dos Estados (2015)\nCoeficiente de Kendall (W) = {W:.3f}', fontsize=16)
     plt.ylabel('Posição no Ranking', fontsize=12)
