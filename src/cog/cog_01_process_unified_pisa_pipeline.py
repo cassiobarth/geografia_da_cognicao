@@ -2,7 +2,7 @@
 ================================================================================
 PROJECT:         Geography of Cognition: Poverty, Wealth, and Inequalities in Brazil
 SCRIPT:          src/cog/cog_04_process_pisa_unified.py
-VERSION:         8.1 (Concept x Method Selection Logic)
+VERSION:         8.2 (Smart Timeout + Explicit CSV Output)
 DATE:            2026-01-27
 --------------------------------------------------------------------------------
 PRINCIPAL INVESTIGATOR:  Dr. José Aparecido da Silva
@@ -13,7 +13,7 @@ PISA 2018: https://zenodo.org/records/13383115
 PISA 2022: https://zenodo.org/records/13382904
 ================================================================================
 
-ABSTRACT:
+ABSTRACT: 
     Unified ETL pipeline for processing PISA student-level microdata.
     Handles architectural shifts across cycles (2015-2022).
     
@@ -56,7 +56,7 @@ LOG_DIR = PROJECT_ROOT / 'logs'
 for path in [CSV_OUT_DIR, XLSX_OUT_DIR, LOG_DIR]:
     path.mkdir(parents=True, exist_ok=True)
 
-# --- WINDOWS TIMEOUT INPUT UTILITY (FIXED: getwch) ---
+# --- WINDOWS TIMEOUT INPUT UTILITY (UPDATED v8.2) ---
 try:
     import msvcrt
     def input_timeout(prompt, timeout=10, default=''):
@@ -73,7 +73,9 @@ try:
                     return res if res else default
                 input_chars.append(char)
                 print(char, end='', flush=True) # Manual echo
-            if (time.time() - start_time) > timeout:
+            
+            # ALTERAÇÃO v8.2: O timeout só ocorre se o usuário NÃO digitou nada ainda
+            if not input_chars and (time.time() - start_time) > timeout:
                 print(f"\n[TIMEOUT] Usando padrão: {default}")
                 return default
             time.sleep(0.05)
@@ -228,15 +230,18 @@ class PisaUnifiedETL:
         return final_df
     
     def _save(self, df, fname):
+        # ALTERAÇÃO v8.2: Garantia de Output CSV explícito
         suffix = ""
         if self.mode == 'SIMPLE': suffix = "_simples"
         elif self.mode == 'WEIGHTED': suffix = "_ponderada"
         
         full_name = f"{fname}{suffix}"
         
-        df.to_csv(CSV_OUT_DIR / f"{full_name}.csv", index=False)
+        # Encoding utf-8-sig para garantir acentos corretos no Excel BR
+        df.to_csv(CSV_OUT_DIR / f"{full_name}.csv", index=False, encoding='utf-8-sig')
         df.to_excel(XLSX_OUT_DIR / f"{full_name}.xlsx", index=False)
-        print(f"   [OK] Gerado: {full_name}.xlsx | N: {int(df['N_Alunos'].sum())}")
+        
+        print(f"   [OK] Gerado: {full_name}.csv e .xlsx | N: {int(df['N_Alunos'].sum())}")
 
     def run_2015(self):
         print(f"\n[INÍCIO] Processando PISA 2015 (Estados)...")
@@ -367,12 +372,19 @@ class PisaUnifiedETL:
 
 def main():
     os.system('cls' if os.name == 'nt' else 'clear')
-    print("=== PISA UNIFIED PIPELINE v8.1 ===")
+    print("=== PISA UNIFIED PIPELINE v8.2 ===")
     
     # 1. YEARS
     print("\n[1/3] SELEÇÃO DE ANOS")
     print("Disponíveis: 2015, 2018, 2022")
     raw_years = input_timeout(">> Digite anos (ex: 2015) ou ENTER para Todos", default="2015, 2018, 2022")
+
+    # --- CANCELAMENTO ---
+    if any(x in str(var_to_check).upper() for x in ['SAIR', 'EXIT', 'Q', 'CANCEL']):
+        print("\n[!] Operação cancelada pelo usuário.")
+        sys.exit()
+    # --------------------
+
     try:
         years = [int(y.strip()) for y in raw_years.split(',') if y.strip()]
     except:
