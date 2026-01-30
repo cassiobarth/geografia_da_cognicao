@@ -2,8 +2,8 @@
 ================================================================================
 PROJECT:         Geography of Cognition: Poverty, Wealth, and Inequalities in Brazil
 SCRIPT:          src/cog/cog_04_process_pisa_unified.py
-VERSION:         8.2 (Smart Timeout + Explicit CSV Output)
-DATE:            2026-01-27
+VERSION:         8.3 (UI Update: Exit Instructions)
+DATE:            2026-01-29
 --------------------------------------------------------------------------------
 PRINCIPAL INVESTIGATOR:  Dr. José Aparecido da Silva
 LEAD DATA SCIENTIST:     Me. Cássio Dalbem Barth
@@ -25,7 +25,7 @@ ABSTRACT:
 
 RASTREABILITY SETTINGS:
     - INPUT_ROOT:  data/raw/Pisa/
-    - OUTPUT_CSV:  data/processed/pisa_table_[year]_[scope].csv
+    - OUTPUT_CSV:  data/processed/testes/pisa_table_[year]_[scope].csv
     - LOG_FILE:    logs/pisa_pipeline_[year].log
 
 DEPENDENCIES:
@@ -49,7 +49,7 @@ CURRENT_FILE = Path(__file__).resolve()
 PROJECT_ROOT = CURRENT_FILE.parent.parent.parent
 DATA_RAW_ROOT = PROJECT_ROOT / 'data' / 'raw' / 'Pisa'
 REPORT_DIR = PROJECT_ROOT / 'reports' / 'varcog'
-CSV_OUT_DIR = PROJECT_ROOT / 'data' / 'processed'
+CSV_OUT_DIR = PROJECT_ROOT / 'data' / 'processed' / 'testes'
 XLSX_OUT_DIR = REPORT_DIR / 'xlsx'
 LOG_DIR = PROJECT_ROOT / 'logs'
 
@@ -372,15 +372,16 @@ class PisaUnifiedETL:
 
 def main():
     os.system('cls' if os.name == 'nt' else 'clear')
-    print("=== PISA UNIFIED PIPELINE v8.2 ===")
+    print("=== PISA UNIFIED PIPELINE v8.3 ===")
+    print("(Dica: Digite 'Q' ou 'SAIR' em qualquer menu para cancelar)")
     
     # 1. YEARS
     print("\n[1/3] SELEÇÃO DE ANOS")
     print("Disponíveis: 2015, 2018, 2022")
-    raw_years = input_timeout(">> Digite anos (ex: 2015) ou ENTER para Todos", default="2015, 2018, 2022")
+    raw_years = input_timeout(">> Digite anos (ex: 2015), ENTER para Todos ou 'Q' para Sair", default="2015, 2018, 2022")
 
     # --- CANCELAMENTO ---
-    if any(x in str(var_to_check).upper() for x in ['SAIR', 'EXIT', 'Q', 'CANCEL']):
+    if any(x in str(raw_years).upper() for x in ['SAIR', 'EXIT', 'Q', 'CANCEL']):
         print("\n[!] Operação cancelada pelo usuário.")
         sys.exit()
     # --------------------
@@ -403,8 +404,12 @@ def main():
     print("  [4] Média Geral (Global)")
     print("  [5] N_Alunos (Contagem)")
         
-    raw_cols = input_timeout(">> Digite os NÚMEROS (ex: 1, 4) ou ENTER para Todas", default="TODAS")
-    
+    raw_cols = input_timeout(">> Digite os NÚMEROS (ex: 1, 4), ENTER para Todas ou 'Q' para Sair", default="TODAS")
+    # --- CANCELAMENTO ---
+    if any(x in str(raw_cols).upper() for x in ['SAIR', 'EXIT', 'Q', 'CANCEL']):
+        print("\n[!] Operação cancelada pelo usuário.")
+        sys.exit()
+    # --------------------
     user_concepts = None
     if raw_cols != "TODAS":
         try:
@@ -420,8 +425,12 @@ def main():
     print("  [1] Apenas Média Simples (Legacy)")
     print("  [2] Apenas Média Ponderada (Recomendado)")
     print("  [3] Ambas (Comparativo)")
-    op = input_timeout(">> Opção", default="3")
-    
+    op = input_timeout(">> Opção (ou 'Q' para Sair)", default="3")
+    # --- CANCELAMENTO ---
+    if any(x in str(op).upper() for x in ['SAIR', 'EXIT', 'Q', 'CANCEL']):
+        print("\n[!] Operação cancelada pelo usuário.")
+        sys.exit()
+    # --------------------
     mode_map = {'1': 'SIMPLE', '2': 'WEIGHTED', '3': 'BOTH'}
     selected_mode = mode_map.get(op, 'BOTH')
 

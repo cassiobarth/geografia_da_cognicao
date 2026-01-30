@@ -22,7 +22,7 @@ ABSTRACT:
 
 RASTREABILITY SETTINGS:
     - INPUT_ROOT:  data/raw/saeb/
-    - OUTPUT_CSV:  data/processed/saeb_table_[year]_[grade].csv
+    - OUTPUT_CSV:  data/processed/testes/saeb_table_[year]_[grade].csv
     - LOG_FILE:    logs/saeb_pipeline_[year].log
 
 DEPENDENCIES:
@@ -43,7 +43,7 @@ warnings.filterwarnings("ignore")
 # --- GLOBAL CONFIG ---
 BASE_PATH = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DATA_RAW = os.path.join(BASE_PATH, 'data', 'raw', 'saeb')
-DATA_PROCESSED = os.path.join(BASE_PATH, 'data', 'processed')
+DATA_PROCESSED = os.path.join(BASE_PATH, 'data', 'processed', 'testes')
 REPORT_XLSX = os.path.join(BASE_PATH, 'reports', 'varcog', 'xlsx') 
 LOG_DIR = os.path.join(BASE_PATH, 'logs')
 

@@ -1,32 +1,29 @@
 """
 ================================================================================
 PROJECT:    Geography of Cognition: Poverty, Wealth, and Inequalities in Brazil
-SCRIPT:     src/cog/cog_02_process_enem_unified_pipeline.py
-VERSION:    4.0 (Production - Column Selection / Multi-Filter / PT-BR)
-DATE:       2026-01-26
+SCRIPT:     src/cog/process_enem_unified_pipeline.py
+VERSION:    4.3 (Fix: Force Proxy Generation & Debug Columns)
+DATE:       2026-01-29
 --------------------------------------------------------------------------------
 PRINCIPAL INVESTIGATOR:  Dr. José Aparecido da Silva
 LEAD DATA SCIENTIST:     Me. Cássio Dalbem Barth
-SOURCE:                  INEP Microdata (ENEM). Available at:
-https://www.gov.br/inep/pt-br/acesso-a-informacao/dados-abertos/microdados/enem
+SOURCE:                  INEP Microdata (ENEM)
 ================================================================================
 
 ABSTRACT:
-    Unified ETL pipeline for processing INEP ENEM student-level microdata. 
+    Unified ETL pipeline for processing INEP ENEM student-level microdata.
     
-    Key Features v4.0:
-    - Interactive Column Selection (User defines output schema).
-    - Multi-Filter Support (Strict/Proxy/Both).
-    - Student Count (N) Extraction.
-    - Full PT-BR Output.
+    Update v4.3:
+    - Expanded column mapping for 'SCHOOL_ID' to ensure PROXY works on 2015.
+    - Added explicit debugging messages if a filter is skipped.
+    - Fixed logic for Option 3 (BOTH) to ensure it attempts both filters independently.
 
 RASTREABILITY SETTINGS:
     - INPUT_ROOT:  data/raw/enem/
-    - OUTPUT_CSV:  data/processed/enem_table_[year]_[filter].csv
-    - LOG_FILE:    logs/enem_pipeline_[year].log
+    - OUTPUT_CSV:  data/processed/testes/enem_table_[year]_[filter].csv
 
 DEPENDENCIES:
-    pandas, numpy, zipfile, logging, os
+    pandas, numpy, zipfile, os
 ================================================================================
 """
 
@@ -34,31 +31,32 @@ import pandas as pd
 import numpy as np
 import os
 import zipfile
-import logging
 import time
 import warnings
+import sys
 
 warnings.filterwarnings("ignore")
 
 # --- GLOBAL CONFIG ---
 BASE_PATH = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DATA_RAW = os.path.join(BASE_PATH, 'data', 'raw', 'enem')
-DATA_PROCESSED = os.path.join(BASE_PATH, 'data', 'processed')
+DATA_PROCESSED = os.path.join(BASE_PATH, 'data', 'processed', 'testes')
 REPORT_XLSX = os.path.join(BASE_PATH, 'reports', 'varcog', 'xlsx')
 LOG_DIR = os.path.join(BASE_PATH, 'logs')
 
 for p in [DATA_RAW, DATA_PROCESSED, REPORT_XLSX, LOG_DIR]:
     os.makedirs(p, exist_ok=True)
 
+# Mapeamento expandido para garantir que pegue 2015
 TARGET_COLS = {
-    'UF': ['SG_UF_PROVA', 'UF_PROVA', 'SG_UF_RESIDENCIA'],
-    'SCHOOL_ID': ['CO_ESCOLA', 'ID_ESCOLA'],
-    'STATUS': ['TP_ST_CONCLUSAO'],
-    'CN': ['NU_NOTA_CN'],
-    'CH': ['NU_NOTA_CH'],
-    'LC': ['NU_NOTA_LC'],
-    'MT': ['NU_NOTA_MT'],
-    'RED': ['NU_NOTA_REDACAO']
+    'UF': ['SG_UF_PROVA', 'UF_PROVA', 'SG_UF_RESIDENCIA', 'NO_UF_PROVA'],
+    'SCHOOL_ID': ['CO_ESCOLA', 'ID_ESCOLA', 'COD_ESCOLA', 'PK_COD_ENTIDADE', 'CO_ENTIDADE', 'NO_ENTIDADE'],
+    'STATUS': ['TP_ST_CONCLUSAO', 'IN_TP_ENSINO', 'SITUACAO_CONCLUSAO'],
+    'CN': ['NU_NOTA_CN', 'NOTA_CN'],
+    'CH': ['NU_NOTA_CH', 'NOTA_CH'],
+    'LC': ['NU_NOTA_LC', 'NOTA_LC'],
+    'MT': ['NU_NOTA_MT', 'NOTA_MT'],
+    'RED': ['NU_NOTA_REDACAO', 'NU_NOTA_RED']
 }
 
 UF_REGION_MAP = {
@@ -70,11 +68,12 @@ UF_REGION_MAP = {
     'MS': 'Centro-Oeste', 'MT': 'Centro-Oeste', 'GO': 'Centro-Oeste', 'DF': 'Centro-Oeste'
 }
 
-# --- WINDOWS TIMEOUT INPUT UTILITY ---
+# --- UTILS (INPUT) ---
 try:
     import msvcrt
     def input_timeout(prompt, timeout=10, default=''):
-        print(f"{prompt} [Automático em {timeout}s]: ", end='', flush=True)
+        sys.stdout.write(f"{prompt} [Automático em {timeout}s]: ")
+        sys.stdout.flush()
         start_time = time.time()
         input_chars = []
         while True:
@@ -85,7 +84,6 @@ try:
                     res = "".join(input_chars).strip()
                     return res if res else default
                 input_chars.append(char)
-                print(char, end='', flush=True)
             if (time.time() - start_time) > timeout:
                 print(f"\n[TIMEOUT] Usando padrão: {default}")
                 return default
@@ -100,7 +98,7 @@ class EnemPipeline:
         self.year = year
         self.file_path = file_path
         self.filter_choice = filter_choice
-        self.user_cols = user_cols # Lista de colunas desejadas
+        self.user_cols = user_cols
 
     def get_largest_csv(self, z):
         csv_files = [f for f in z.namelist() if f.lower().endswith('.csv')]
@@ -117,24 +115,49 @@ class EnemPipeline:
         try:
             with zipfile.ZipFile(self.file_path, 'r') as z:
                 target_filename = self.get_largest_csv(z)
+                print(f"   Arquivo alvo no ZIP: {target_filename}")
+                
                 with z.open(target_filename) as f:
+                    # Detecção de Separador e Header
                     first_line = f.readline().decode('latin1')
                     sep = ';' if first_line.count(';') > first_line.count(',') else ','
                     f.seek(0)
                     header = pd.read_csv(f, sep=sep, encoding='latin1', nrows=0).columns.tolist()
                     
-                    col_map = {self.find_col_flexible(header, v): k for k, v in TARGET_COLS.items() if self.find_col_flexible(header, v)}
+                    # Debug Columns
+                    print(f"   Header detectado ({len(header)} colunas): {header[:5]} ...")
                     
+                    col_map = {self.find_col_flexible(header, v): k for k, v in TARGET_COLS.items() if self.find_col_flexible(header, v)}
+                    print(f"   Colunas mapeadas: {list(col_map.values())}")
+                    
+                    # Lógica de Modos (Agora com aviso explícito de falha)
                     modes = []
-                    if self.filter_choice in ['STRICT', 'BOTH'] and 'STATUS' in col_map.values(): modes.append('STRICT')
-                    if self.filter_choice in ['PROXY', 'BOTH'] and 'SCHOOL_ID' in col_map.values(): modes.append('PROXY')
+                    
+                    # STRICT (Requer STATUS)
+                    if self.filter_choice in ['STRICT', 'BOTH']:
+                        if 'STATUS' in col_map.values():
+                            modes.append('STRICT')
+                        else:
+                            print("   [ERRO] Pulo STRICT: Coluna de 'STATUS' (TP_ST_CONCLUSAO) não encontrada.")
+
+                    # PROXY (Requer SCHOOL_ID)
+                    if self.filter_choice in ['PROXY', 'BOTH']:
+                        if 'SCHOOL_ID' in col_map.values():
+                            modes.append('PROXY')
+                        else:
+                            print("   [ERRO] Pulo PROXY: Coluna de 'SCHOOL_ID' (CO_ESCOLA) não encontrada.")
+                            print(f"          Procurei por: {TARGET_COLS['SCHOOL_ID']}")
+
+                    # NONE (Requer nada específico além das notas)
+                    if self.filter_choice == 'NONE': 
+                        modes.append('NONE')
 
                     if not modes:
-                        print(f"   [AVISO] Filtros não suportados para {self.year}.")
+                        print(f"   [ABORTADO] Nenhuma coluna compatível encontrada para o filtro selecionado.")
                         return
 
                     for mode in modes:
-                        print(f"   -> Executando Filtro: {mode}")
+                        print(f"   -> Executando Filtro: {mode}...")
                         f.seek(0)
                         reader = pd.read_csv(f, sep=sep, encoding='latin1', usecols=list(col_map.keys()), chunksize=500000)
                         agg_storage = []
@@ -142,7 +165,17 @@ class EnemPipeline:
 
                         for chunk in reader:
                             chunk = chunk.rename(columns=col_map)
-                            chunk = chunk[chunk['STATUS'] == 2].copy() if mode == 'STRICT' else chunk[chunk['SCHOOL_ID'].notna()].copy()
+                            
+                            # FILTROS
+                            if mode == 'STRICT':
+                                chunk = chunk[chunk['STATUS'] == 2].copy()
+                            elif mode == 'PROXY':
+                                # Garante que não é nulo e não é zero
+                                chunk = chunk[chunk['SCHOOL_ID'].notna()]
+                                chunk = chunk[chunk['SCHOOL_ID'] != 0].copy()
+                            elif mode == 'NONE':
+                                pass 
+                            
                             if chunk.empty: continue
                             
                             valid_scores = [c for c in score_cols if c in chunk.columns]
@@ -152,6 +185,10 @@ class EnemPipeline:
                             
                             agg_chunk = chunk.groupby('UF')[valid_scores + ['Média_Geral', 'N_Alunos']].agg(['sum'])
                             agg_storage.append(agg_chunk)
+
+                        if not agg_storage:
+                            print(f"   [AVISO] Nenhum dado restou após filtragem ({mode}). Verifique se os dados contêm a informação necessária.")
+                            continue
 
                         full_agg = pd.concat(agg_storage).groupby(level=0).sum()
                         final_df = pd.DataFrame(index=full_agg.index)
@@ -163,7 +200,9 @@ class EnemPipeline:
                         final_df = final_df.reset_index()
                         final_df['Região'] = final_df['UF'].map(UF_REGION_MAP)
                         final_df['Ano'] = self.year
-                        final_df['Filtro'] = f"{mode}_3EM"
+                        
+                        filter_tag = "ALL_CANDIDATES" if mode == 'NONE' else f"{mode}_3EM"
+                        final_df['Filtro'] = filter_tag
                         
                         rename_dict = {
                             'CN': 'Ciências_Natureza', 'CH': 'Ciências_Humanas', 
@@ -171,67 +210,51 @@ class EnemPipeline:
                         }
                         final_df = final_df.rename(columns=rename_dict)
                         
-                        # --- FILTRAGEM DE COLUNAS (NOVA FEATURE) ---
                         all_cols_ptbr = ['Ano', 'Região', 'UF', 'Filtro', 'Média_Geral', 'N_Alunos'] + [rename_dict[c] for c in score_cols if c in rename_dict]
                         
-                        # Se o usuário definiu colunas, fazemos a intersecção
                         if self.user_cols:
-                            # Normaliza para garantir match (strip)
                             cols_to_keep = [c for c in all_cols_ptbr if c in self.user_cols]
-                            # Se não sobrou nada (erro de digitação), volta para o padrão
-                            if not cols_to_keep: 
-                                cols_to_keep = all_cols_ptbr
+                            if not cols_to_keep: cols_to_keep = all_cols_ptbr
                         else:
                             cols_to_keep = all_cols_ptbr
 
                         final_df = final_df[cols_to_keep]
-                        # Tenta ordenar por Média_Geral se ela existir na seleção
                         if 'Média_Geral' in final_df.columns:
                             final_df = final_df.sort_values('Média_Geral', ascending=False)
                         
-                        fname = f"enem_table_{self.year}_{mode}_3EM"
+                        fname = f"enem_table_{self.year}_{filter_tag}"
                         final_df.to_csv(os.path.join(DATA_PROCESSED, f"{fname}.csv"), index=False)
                         final_df.to_excel(os.path.join(REPORT_XLSX, f"{fname}.xlsx"), index=False)
                         
-                        # Log seguro caso N_Alunos tenha sido removido da seleção
-                        n_count = int(total_n.sum()) # Pega do total bruto
-                        print(f"      [OK] Gerado: {fname} | N: {n_count}")
+                        n_count = int(total_n.sum())
+                        print(f"      [OK] Arquivo gerado: {fname} | N: {n_count}")
 
         except Exception as e:
-            print(f"   [ERRO] {e}")
+            print(f"   [ERRO CRÍTICO] {e}")
 
 def main():
     os.system('cls' if os.name == 'nt' else 'clear')
-    print("=== ENEM UNIFIED PIPELINE v4.0 ===")
+    print("=== ENEM UNIFIED PIPELINE v4.3 ===")
     
     # 1. Anos
-    raw_years = input_timeout(">> Anos (ex: 2015, 2022)", timeout=10, default="2015, 2018, 2022")
+    raw_years = input_timeout(">> Anos (ex: 2015, 2022)", timeout=10, default="2015")
     try:
         years = [int(y.strip()) for y in raw_years.split(',') if y.strip()]
-        if not years: raise ValueError
     except:
-        years = [2015, 2018, 2022]
+        years = [2015]
     
     # 2. Metodologia
     print("\nMETODOLOGIA:")
-    print("1. STRICT (Concluintes) | 2. PROXY (Vínculo Escolar) | 3. AMBOS")
-    raw_f = input_timeout(">> Selecione o Filtro", timeout=10, default="1")
-    f_map = {'1': 'STRICT', '2': 'PROXY', '3': 'BOTH'}
-    selected_filter = f_map.get(raw_f, 'STRICT')
+    print("1. STRICT (Concluintes) | 2. PROXY (Vínculo) | 3. AMBOS | 4. SEM FILTRO (Total)")
+    
+    raw_f = input_timeout(">> Selecione o Filtro", timeout=10, default="3")
+    f_map = {'1': 'STRICT', '2': 'PROXY', '3': 'BOTH', '4': 'NONE'}
+    selected_filter = f_map.get(raw_f, 'BOTH')
 
-    # 3. Colunas (Nova Feature)
-    print("\nCOLUNAS DISPONÍVEIS:")
-    print("[Ano, Região, UF, Filtro, Média_Geral, N_Alunos]")
-    print("[Ciências_Natureza, Ciências_Humanas, Linguagens, Matemática, Redação]")
-    
-    raw_cols = input_timeout(">> Digite as colunas desejadas", timeout=10, default="TODAS")
-    
-    if raw_cols == "TODAS":
-        user_cols_list = None
-        print(f"\n[CONFIG] Anos: {years} | Filtro: {selected_filter} | Colunas: TODAS")
-    else:
-        user_cols_list = [c.strip() for c in raw_cols.split(',')]
-        print(f"\n[CONFIG] Anos: {years} | Filtro: {selected_filter} | Colunas: {len(user_cols_list)} selecionadas")
+    # 3. Colunas
+    print("\nCOLUNAS (Enter para TODAS):")
+    raw_cols = input_timeout(">> Digite colunas", timeout=5, default="TODAS")
+    user_cols_list = None if raw_cols == "TODAS" else [c.strip() for c in raw_cols.split(',')]
     
     print("-" * 60)
 
@@ -240,9 +263,9 @@ def main():
         if os.path.exists(path):
             EnemPipeline(y, path, selected_filter, user_cols_list).process()
         else:
-            print(f"[PULAR] Faltando: {path}")
+            print(f"[PULAR] Arquivo não encontrado: {path}")
 
-    print("\n[CONCLUÍDO] Processos finalizados.")
+    print("\n[CONCLUÍDO] Pipeline finalizado.")
 
 if __name__ == "__main__":
     main()

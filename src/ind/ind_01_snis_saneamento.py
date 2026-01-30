@@ -1,17 +1,17 @@
 """
 ================================================================================
-PROJECT:        COGNITIVE CAPITAL ANALYSIS - BRAZIL
-SCRIPT:         src/indicadores/extract_snis_data.py
-VERSION:        1.2 (Added Source URL & Link Integrity)
-DATE:           2026-01-13
+PROJECT:    Geography of Cognition: Poverty, Wealth, and Inequalities in Brazil
+SCRIPT:     src/ind/extract_snis_data.py
+VERSION:    1.2 (Added Source URL & Link Integrity)
+DATE:       2026-01-13
 --------------------------------------------------------------------------------
 PRINCIPAL INVESTIGATOR:  Dr. José Aparecido da Silva
 LEAD DEVELOPER:          Specialist in Applied Statistics
-SOURCE:                 SNIS (Sistema Nacional de Informações sobre Saneamento)
+SOURCE:                  SNIS (Sistema Nacional de Informações sobre Saneamento)
 ================================================================================
 
 ABSTRACT:
-    Automated ETL pipeline for the National Sanitation Information System (SNIS).
+    Automated ETL pipeline for the National saneamento Information System (SNIS).
     Extracts and aggregates municipal data to state-level (UF) indicators.
 
 DATA SOURCE:
@@ -19,9 +19,9 @@ DATA SOURCE:
     - URL: http://app4.mdr.gov.br/serieHistorica/ (Selected: Municípios / 2022)
 
 OUTPUTS:
-    1. CSV: data/processed/indicadores/sanitation_indicators_2022.csv
-    2. XLSX: reports/indicadores/xlsx/sanitation_indicators_2022.xlsx
-    3. PLOT: reports/indicadores/graficos/sanitation_quadrant_analysis.png
+    1. CSV: data/processed/indicadores/saneamento_indicators_2022.csv
+    2. XLSX: reports/indicadores/xlsx/saneamento_indicators_2022.xlsx
+    3. PLOT: reports/indicadores/graficos/saneamento_quadrant_analysis.png
 
 TABLE CONTENT:
     - SG_UF_PROVA: State abbreviation (Federation Unit).
@@ -48,7 +48,7 @@ output_dir_csv = os.path.join(base_dir, 'data', 'processed', 'indicadores')
 output_dir_xlsx = os.path.join(base_dir, 'reports', 'indicadores', 'xlsx')
 output_dir_plots = os.path.join(base_dir, 'reports', 'indicadores', 'graficos')
 
-input_file = os.path.join(base_dir, 'data', 'raw', 'snis_municipios_2022.csv')
+input_file = os.path.join(base_dir, 'data', 'raw', 'var_ind', 'snis_municipios_2022.csv')
 
 # Valid Federation Unit acronyms
 SIGLAS_UF = [
@@ -112,15 +112,17 @@ def generate_report_visuals(df):
             fontweight='bold'
         )
     
-    plt.title('sanitation infrastructure profile by state (2022)', fontsize=16, pad=20)
-    plt.xlabel('water supply service coverage (percentage)', fontsize=12)
-    plt.ylabel('sewage collection service coverage (percentage)', fontsize=12)
+    # --- TRADUÇÃO APENAS AQUI ---
+    plt.title('Perfil de Infraestrutura Sanitária por Estado (2022)', fontsize=16, pad=20)
+    plt.xlabel('Cobertura de Abastecimento de Água (%)', fontsize=12)
+    plt.ylabel('Cobertura de Coleta de Esgoto (%)', fontsize=12)
     
     # Reference lines for national targets
-    plt.axhline(90, color='red', linestyle='--', alpha=0.5, label='legal framework target')
+    plt.axhline(90, color='red', linestyle='--', alpha=0.5, label='Meta Marco Legal')
     plt.axvline(99, color='blue', linestyle='--', alpha=0.5)
+    plt.legend() # Added legend to show the label
     
-    plot_path = os.path.join(output_dir_plots, 'sanitation_quadrant_analysis.png')
+    plot_path = os.path.join(output_dir_plots, 'saneamento_quadrant_analysis.png')
     plt.savefig(plot_path, dpi=300, bbox_inches='tight')
     print(f"Visualization saved to: {plot_path}")
 
@@ -195,8 +197,8 @@ def extract_snis_data():
             os.makedirs(output_dir_xlsx, exist_ok=True)
             os.makedirs(output_dir_plots, exist_ok=True)
             
-            file_xlsx = os.path.join(output_dir_xlsx, 'sanitation_indicators_2022.xlsx')
-            file_csv = os.path.join(output_dir_csv, 'sanitation_indicators_2022.csv')
+            file_xlsx = os.path.join(output_dir_xlsx, 'saneamento_indicators_2022.xlsx')
+            file_csv = os.path.join(output_dir_csv, 'saneamento_indicators_2022.csv')
             
             df_final.to_excel(file_xlsx, index=False, sheet_name='SNIS_2022')
             df_final.to_csv(file_csv, index=False, sep=';', encoding='utf-8-sig')
