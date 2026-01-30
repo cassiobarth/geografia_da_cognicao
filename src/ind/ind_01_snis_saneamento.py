@@ -1,9 +1,9 @@
 """
 ================================================================================
 PROJECT:    Geography of Cognition: Poverty, Wealth, and Inequalities in Brazil
-SCRIPT:     src/ind/extract_snis_data.py
-VERSION:    1.2 (Added Source URL & Link Integrity)
-DATE:       2026-01-13
+SCRIPT:     src/ind/ind_01_snis_saneamento.py
+VERSION:    1.3 (Path Update & Standardization)
+DATE:       2026-01-30
 --------------------------------------------------------------------------------
 PRINCIPAL INVESTIGATOR:  Dr. José Aparecido da Silva
 LEAD DEVELOPER:          Specialist in Applied Statistics
@@ -11,7 +11,7 @@ SOURCE:                  SNIS (Sistema Nacional de Informações sobre Saneament
 ================================================================================
 
 ABSTRACT:
-    Automated ETL pipeline for the National saneamento Information System (SNIS).
+    Automated ETL pipeline for the National Saneamento Information System (SNIS).
     Extracts and aggregates municipal data to state-level (UF) indicators.
 
 DATA SOURCE:
@@ -19,9 +19,9 @@ DATA SOURCE:
     - URL: http://app4.mdr.gov.br/serieHistorica/ (Selected: Municípios / 2022)
 
 OUTPUTS:
-    1. CSV: data/processed/indicadores/saneamento_indicators_2022.csv
-    2. XLSX: reports/indicadores/xlsx/saneamento_indicators_2022.xlsx
-    3. PLOT: reports/indicadores/graficos/saneamento_quadrant_analysis.png
+    1. CSV: data/processed/indicadores/ind01_saneamento.csv
+    2. XLSX: reports/indicadores/xlsx/ind01_saneamento.xlsx
+    3. PLOT: reports/indicadores/graficos/ind01_saneamento_quadrant.png
 
 TABLE CONTENT:
     - SG_UF_PROVA: State abbreviation (Federation Unit).
@@ -48,7 +48,8 @@ output_dir_csv = os.path.join(base_dir, 'data', 'processed', 'indicadores')
 output_dir_xlsx = os.path.join(base_dir, 'reports', 'indicadores', 'xlsx')
 output_dir_plots = os.path.join(base_dir, 'reports', 'indicadores', 'graficos')
 
-input_file = os.path.join(base_dir, 'data', 'raw', 'var_ind', 'snis_municipios_2022.csv')
+# UPDATED INPUT PATH
+input_file = os.path.join(base_dir, 'data', 'raw', 'indicadores', 'ind01_bio', 'snis_municipios_2022.csv')
 
 # Valid Federation Unit acronyms
 SIGLAS_UF = [
@@ -113,16 +114,17 @@ def generate_report_visuals(df):
         )
     
     # --- TRADUÇÃO APENAS AQUI ---
-    plt.title('Perfil de Infraestrutura Sanitária por Estado (2022)', fontsize=16, pad=20)
+    plt.title('IND-01: Perfil de Infraestrutura Sanitária por Estado (2022)', fontsize=16, pad=20)
     plt.xlabel('Cobertura de Abastecimento de Água (%)', fontsize=12)
     plt.ylabel('Cobertura de Coleta de Esgoto (%)', fontsize=12)
     
     # Reference lines for national targets
     plt.axhline(90, color='red', linestyle='--', alpha=0.5, label='Meta Marco Legal')
     plt.axvline(99, color='blue', linestyle='--', alpha=0.5)
-    plt.legend() # Added legend to show the label
+    plt.legend() 
     
-    plot_path = os.path.join(output_dir_plots, 'saneamento_quadrant_analysis.png')
+    # UPDATED PLOT FILENAME
+    plot_path = os.path.join(output_dir_plots, 'ind01_saneamento_quadrant.png')
     plt.savefig(plot_path, dpi=300, bbox_inches='tight')
     print(f"Visualization saved to: {plot_path}")
 
@@ -197,8 +199,9 @@ def extract_snis_data():
             os.makedirs(output_dir_xlsx, exist_ok=True)
             os.makedirs(output_dir_plots, exist_ok=True)
             
-            file_xlsx = os.path.join(output_dir_xlsx, 'saneamento_indicators_2022.xlsx')
-            file_csv = os.path.join(output_dir_csv, 'saneamento_indicators_2022.csv')
+            # UPDATED OUTPUT FILENAMES
+            file_xlsx = os.path.join(output_dir_xlsx, 'ind01_saneamento.xlsx')
+            file_csv = os.path.join(output_dir_csv, 'ind01_saneamento.csv')
             
             df_final.to_excel(file_xlsx, index=False, sheet_name='SNIS_2022')
             df_final.to_csv(file_csv, index=False, sep=';', encoding='utf-8-sig')
